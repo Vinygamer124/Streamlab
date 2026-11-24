@@ -296,7 +296,6 @@ private fun ExportScreen(vm: AppViewModel) {
             valueRange = 2f..20f,
             colors = SliderDefaults.colors(thumbColor = Pal.amber, activeTrackColor = Pal.orange, inactiveTrackColor = Pal.panel2),
         )
-        ToggleRow("MP4 phân mảnh (an toàn nếu app bị kill)", st.fragmentedMp4) { vm.updateSettings(st.copy(fragmentedMp4 = it)) }
         ToggleRow("Chuyển cảnh menu GTA 6 → rest mode → PS5 connected", st.transitions) { vm.updateSettings(st.copy(transitions = it)) }
         Spacer(Modifier.height(8.dp))
         Label("Ước lượng trước khi xuất: ${fmtBytes(estimate)} · ổ trống: ${if (free >= 0) fmtBytes(free) else "?"}",

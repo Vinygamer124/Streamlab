@@ -18,7 +18,6 @@ import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
-import androidx.media3.transformer.InAppFragmentedMp4Muxer
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import com.google.common.collect.ImmutableList
@@ -121,7 +120,6 @@ object ExportEngine {
             .setEncoderFactory(encoder)
             .addListener(listener)
         // MP4 phân mảnh: ghi liên tục từng fragment, nếu app bị kill giữa chừng file vẫn xem được tới điểm đó.
-        if (s.fragmentedMp4) b.setMuxerFactory(InAppFragmentedMp4Muxer.Factory())
         return b.build()
     }
 
