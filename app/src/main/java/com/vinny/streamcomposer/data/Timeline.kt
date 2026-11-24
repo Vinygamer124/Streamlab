@@ -83,7 +83,7 @@ data class Timeline(val segs: List<Seg>, val warnings: List<String>) {
 
 private class GameCursor(private val games: List<MediaRef>) {
     private var i = 0
-    private var off = 0L
+    private var off = games.firstOrNull()?.trimStartMs ?: 0L
 
     fun take(durMs: Long): Pair<List<Seg>, Long> {
         val out = ArrayList<Seg>()
@@ -94,8 +94,8 @@ private class GameCursor(private val games: List<MediaRef>) {
                 return out to need
             }
             val g = games[i]
-            val avail = g.durationMs - off
-            if (avail < 500) { i++; off = 0; continue }
+            val avail = g.trimEndMs - off
+            if (avail < 500) { i++; off = games.getOrNull(i)?.trimStartMs ?: 0L; continue }
             val t = minOf(avail, need)
             out += GameSeg(g.uri, off, t)
             off += t

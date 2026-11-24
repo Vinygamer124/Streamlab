@@ -5,7 +5,16 @@ import android.net.Uri
 const val MIN_MS = 60_000L
 
 /** Một file người dùng đã chọn (video/nhạc). */
-data class MediaRef(val uri: Uri, val name: String, val durationMs: Long)
+data class MediaRef(
+    val uri: Uri,
+    val name: String,
+    val durationMs: Long,
+    val trimStartMs: Long = 0L,          // cắt: bắt đầu lấy từ đây
+    val trimEndMs: Long = durationMs,    // cắt: lấy tới đây
+) {
+    /** Thời lượng thực sự được dùng sau khi cắt. */
+    val playMs: Long get() = (trimEndMs - trimStartMs).coerceAtLeast(0L)
+}
 
 enum class BreakKind { COMEBACK, REACTION }
 
@@ -45,6 +54,7 @@ data class ExportSettings(
     val videoMbps: Float = 6f,
     val fragmentedMp4: Boolean = false,
     val transitions: Boolean = true,
+    val safeMode: Boolean = false, // chẩn đoán: tắt overlay contour + social
 )
 
 data class StreamTime(val startMin: Int = 20 * 60, val endMin: Int = 23 * 60) {

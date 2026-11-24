@@ -58,6 +58,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setFrameLunch(uri: Uri?) { keep(uri); _res.value = _res.value.copy(frameLunch = uri); save() }
     fun setFrameDinner(uri: Uri?) { keep(uri); _res.value = _res.value.copy(frameDinner = uri); save() }
     fun setSocial(uri: Uri?) { keep(uri); _res.value = _res.value.copy(socialOverlay = uri); save() }
+    fun setTrim(i: Int, startMs: Long, endMs: Long) {
+        val g = _res.value.games.getOrNull(i) ?: return
+        if (startMs < 0 || endMs > g.durationMs || endMs - startMs < 1000) return
+        _res.value = _res.value.copy(games = _res.value.games.mapIndexed { k, x -> if (k == i) x.copy(trimStartMs = startMs, trimEndMs = endMs) else x })
+        save()
+    }
+    /** Nhân đôi để cắt thêm một đoạn khác của cùng file. */
+    fun duplicateGame(i: Int) {
+        val g = _res.value.games.getOrNull(i) ?: return
+        _res.value = _res.value.copy(games = _res.value.games.toMutableList().also { it.add(i + 1, g) })
+        save()
+    }
     fun removeGame(i: Int) { _res.value = _res.value.copy(games = _res.value.games.filterIndexed { k, _ -> k != i }); save() }
     fun removeReaction(i: Int) { _res.value = _res.value.copy(reactions = _res.value.reactions.filterIndexed { k, _ -> k != i }); save() }
     fun clearMusic() { _res.value = _res.value.copy(music = null); save() }
@@ -165,13 +177,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- lưu / khôi phục ----------
     private fun refsToJson(l: List<MediaRef>) = JSONArray().also { a ->
-        l.forEach { a.put(JSONObject().put("u", it.uri.toString()).put("n", it.name).put("d", it.durationMs)) }
+        l.forEach { a.put(JSONObject().put("u", it.uri.toString()).put("n", it.name).put("d", it.durationMs).put("ts", it.trimStartMs).put("te", it.trimEndMs)) }
     }
 
     private fun jsonToRefs(s: String?): List<MediaRef> {
         if (s.isNullOrEmpty()) return emptyList()
         val a = JSONArray(s)
-        return (0 until a.length()).map { val o = a.getJSONObject(it); MediaRef(Uri.parse(o.getString("u")), o.getString("n"), o.getLong("d")) }
+        return (0 until a.length()).map { val o = a.getJSONObject(it); val d = o.getLong("d"); MediaRef(Uri.parse(o.getString("u")), o.getString("n"), d, o.optLong("ts", 0L), o.optLong("te", d)) }
     }
 
     private fun save() {
@@ -188,6 +200,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .putString("codec", _settings.value.codec.name)
             .putBoolean("frag", _settings.value.fragmentedMp4)
             .putBoolean("trans", _settings.value.transitions)
+            .putBoolean("safe", _settings.value.safeMode)
             .apply()
     }
 
@@ -207,6 +220,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 videoMbps = prefs.getFloat("mbps", 6f),
                 fragmentedMp4 = prefs.getBoolean("frag", false),
                 transitions = prefs.getBoolean("trans", true),
+                safeMode = prefs.getBoolean("safe", false),
             )
         } catch (_: Exception) {}
         autoPlan()

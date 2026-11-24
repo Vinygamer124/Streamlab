@@ -10,7 +10,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
-import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
@@ -50,7 +49,6 @@ data class ExportJob(
  */
 @UnstableApi
 object ExportEngine {
-    private const val FPS = 30f
 
     fun buildComposition(ctx: Context, job: ExportJob): Composition {
         val res = job.resources
@@ -61,7 +59,6 @@ object ExportEngine {
         val frameDinner = if (res.frameDinner != null) BitmapLoader.load(ctx, res.frameDinner, "overlays/frame_lunch.png") else frameLunch
 
         val common: List<Effect> = listOf(
-            FrameDropEffect.createDefaultFrameDropEffect(FPS),
             Presentation.createForWidthAndHeight(OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
         )
 
@@ -73,14 +70,17 @@ object ExportEngine {
                 is ReactionSeg -> {
                     val frame = if (seg.dinner) frameDinner else frameLunch
                     val fx = listOf(
-                        FrameDropEffect.createDefaultFrameDropEffect(FPS),
-                        Presentation.createForWidthAndHeight(OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
+                                    Presentation.createForWidthAndHeight(OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
                         ReactionWindow.matrix(),
                         // thứ tự: contour (dưới) -> khung (trên). Mỗi item có ContourOverlay riêng để thread-safe.
-                        OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
-                            ContourOverlay.forReactionWindow(),
-                            BitmapOverlay.createStaticBitmapOverlay(frame),
-                        )),
+                        OverlayEffect(
+                            if (job.settings.safeMode) ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                                BitmapOverlay.createStaticBitmapOverlay(frame),
+                            ) else ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                                ContourOverlay.forReactionWindow(),
+                                BitmapOverlay.createStaticBitmapOverlay(frame),
+                            )
+                        ),
                     )
                     item(seg.src, 0L, seg.durationMs, fx)
                 }
@@ -96,7 +96,8 @@ object ExportEngine {
             .setEffects(
                 Effects(
                     emptyList<AudioProcessor>(),
-                    listOf<Effect>(OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                    if (job.settings.safeMode) emptyList<Effect>()
+                    else listOf<Effect>(OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
                         BitmapOverlay.createStaticBitmapOverlay(social)
                     ))),
                 )
@@ -119,7 +120,6 @@ object ExportEngine {
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
             .setEncoderFactory(encoder)
             .addListener(listener)
-        // MP4 phân mảnh: ghi liên tục từng fragment, nếu app bị kill giữa chừng file vẫn xem được tới điểm đó.
         return b.build()
     }
 

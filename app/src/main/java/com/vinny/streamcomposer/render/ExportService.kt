@@ -110,7 +110,7 @@ class ExportService : Service() {
             transformer = ExportEngine.buildTransformer(this, job.settings, object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) = finish(null)
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) =
-                    finish("${exportException.errorCodeName}: ${exportException.message}")
+                    finish(describe(exportException))
             })
             transformer!!.start(composition, job.outputPath)
             handler.postDelayed(poll, 1000)
@@ -163,6 +163,18 @@ class ExportService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID + 1, notifFinal(if (error == null) "Xuất xong 🎉" else "Lỗi: $error"))
         teardown()
+    }
+
+    private fun describe(t: Throwable): String {
+        val sb = StringBuilder()
+        var c: Throwable? = t
+        var n = 0
+        while (c != null && n < 5) {
+            sb.append(c.javaClass.simpleName).append(": ").append(c.message).append("\n")
+            c.stackTrace.firstOrNull()?.let { sb.append("  at ").append(it).append("\n") }
+            c = c.cause; n++
+        }
+        return sb.toString().trim()
     }
 
     private fun teardown() {

@@ -115,9 +115,9 @@ private fun ResourcesScreen(vm: AppViewModel) {
         Title("1 · Video game")
         Label("Có thể rất dài (vài tiếng), chọn nhiều file – app nối theo thứ tự.")
         Spacer(Modifier.height(8.dp))
-        res.games.forEachIndexed { i, g -> FileRow(g, onRemove = { vm.removeGame(i) }) }
+        res.games.forEachIndexed { i, g -> GameRow(i, g, vm) }
         ForgeButton("+ Thêm video game", onClick = { pickGames.launch(arrayOf("video/*")) })
-        if (res.games.isNotEmpty()) Label("Tổng: ${fmtDur(res.games.sumOf { it.durationMs })}")
+        if (res.games.isNotEmpty()) Label("Tổng sau khi cắt: ${fmtDur(res.games.sumOf { it.playMs })}")
     }
     PixelPanel {
         Title("2 · Video reaction")
@@ -140,6 +140,57 @@ private fun ResourcesScreen(vm: AppViewModel) {
         AssetRow("3 social (phủ toàn bộ stream)", res.socialOverlay, { pickSocial.launch(arrayOf("image/png")) }, { vm.setSocial(null) })
         AssetRow("Khung Lunch (cửa sổ trong suốt x64–1463, y174–961)", res.frameLunch, { pickLunch.launch(arrayOf("image/png")) }, { vm.setFrameLunch(null) })
         AssetRow("Khung Dinner (tuỳ chọn)", res.frameDinner, { pickDinner.launch(arrayOf("image/png")) }, { vm.setFrameDinner(null) })
+    }
+}
+
+private fun parseHms(s: String): Long? {
+    val p = s.trim().split(":")
+    if (p.isEmpty() || p.size > 3) return null
+    var sec = 0L
+    for (x in p) sec = sec * 60 + (x.toLongOrNull()?.takeIf { it >= 0 } ?: return null)
+    return sec * 1000
+}
+
+private fun fmtHms(ms: Long): String {
+    val t = ms / 1000
+    return "%d:%02d:%02d".format(t / 3600, (t % 3600) / 60, t % 60)
+}
+
+/** Dòng video game có nút ✂ để cắt đoạn (từ … đến …) và nhân đôi để lấy thêm đoạn khác của cùng file. */
+@UnstableApi
+@Composable
+private fun GameRow(i: Int, g: MediaRef, vm: AppViewModel) {
+    var open by remember { mutableStateOf(false) }
+    var s by remember(i, g.durationMs) { mutableStateOf(fmtHms(g.trimStartMs)) }
+    var e by remember(i, g.durationMs) { mutableStateOf(fmtHms(g.trimEndMs)) }
+    fun commit() {
+        val a = parseHms(s) ?: return
+        val b = parseHms(e) ?: return
+        vm.setTrim(i, a, b)
+    }
+    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Dot(Pal.orange)
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                Text(g.name, color = Pal.text, maxLines = 1, fontSize = 14.sp)
+                Label("Dùng ${fmtDur(g.playMs)} / ${fmtDur(g.durationMs)}  (${fmtHms(g.trimStartMs)} → ${fmtHms(g.trimEndMs)})")
+            }
+            Chip("✂", Pal.amber, onClick = { open = !open })
+            Spacer(Modifier.padding(horizontal = 3.dp))
+            Chip("✕", Pal.bad, onClick = { vm.removeGame(i) })
+        }
+        if (open) {
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TimeField("Từ (h:mm:ss)", s, Modifier.weight(1f)) { s = it; commit() }
+                TimeField("Đến (h:mm:ss)", e, Modifier.weight(1f)) { e = it; commit() }
+            }
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Chip("Nhân đôi: cắt thêm đoạn khác", Pal.amber, onClick = { vm.duplicateGame(i) })
+                Chip("Cả file", Pal.muted, onClick = {
+                    s = fmtHms(0); e = fmtHms(g.durationMs); vm.setTrim(i, 0, g.durationMs)
+                })
+            }
+        }
     }
 }
 
@@ -297,6 +348,7 @@ private fun ExportScreen(vm: AppViewModel) {
             colors = SliderDefaults.colors(thumbColor = Pal.amber, activeTrackColor = Pal.orange, inactiveTrackColor = Pal.panel2),
         )
         ToggleRow("Chuyển cảnh menu GTA 6 → rest mode → PS5 connected", st.transitions) { vm.updateSettings(st.copy(transitions = it)) }
+        ToggleRow("Chế độ an toàn (tắt contour + social, dùng để dò lỗi)", st.safeMode) { vm.updateSettings(st.copy(safeMode = it)) }
         Spacer(Modifier.height(8.dp))
         Label("Ước lượng trước khi xuất: ${fmtBytes(estimate)} · ổ trống: ${if (free >= 0) fmtBytes(free) else "?"}",
             color = if (free in 0 until estimate) Pal.bad else Pal.amber)
