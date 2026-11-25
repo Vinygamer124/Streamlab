@@ -26,7 +26,7 @@ import kotlin.math.sqrt
  *   nền đen (rest_a.mp4, chỉ mang âm thanh giao diện đã lọc)
  *   └ [1] khung game cuối làm mờ (nền)
  *   └ [2] khung game nét, mờ dần 0,3–0,6 s (hiệu ứng game đóng băng rồi nhoè)
- *   └ [3] "plate": UI GTA/PS5 có kênh alpha (assets/rest/*.webp) – đã tách sạch khỏi video tham chiếu
+ *   └ [3] "plate": UI GTA/PS5 có kênh alpha (assets/rest/ (file .webp)) – đã tách sạch khỏi video tham chiếu
  *   └ [4] đồng hồ PS5 vẽ bằng code, giờ khớp giờ live
  */
 class RestMeta(ctx: Context) {
