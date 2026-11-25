@@ -118,6 +118,7 @@ object ExportEngine {
         val b = Transformer.Builder(ctx)
             .setVideoMimeType(s.codec.mime)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
+            .setMaxDelayBetweenMuxerSamplesMs(C.TIME_UNSET)
             .setEncoderFactory(encoder)
             .addListener(listener)
         return b.build()
