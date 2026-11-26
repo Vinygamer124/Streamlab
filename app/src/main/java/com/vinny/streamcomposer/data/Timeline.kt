@@ -11,6 +11,7 @@ object Clips {
     const val REST_A = "rest_a.mp4"   // 0–4,6s: menu GTA 6 → PS5 → Power (nền đen, overlay vẽ bằng code)
     const val REST_B = "rest_b.mp4"   // 4,6–10,3s: màn hình "Putting your PS5 into rest mode…"
     const val SILENCE = "silence.m4a"
+    const val CRASH = "ps5_crash.mp4" // 8,5 s: tối → màn "Game or App Error" → "Report Problem" + âm thanh PS5 (kết thúc ở khung cuối)
 
     const val LOOP_MS = 10_000L
     const val REST_A_MS = 4_600L
@@ -20,6 +21,13 @@ object Clips {
     const val CLOCK_AT_MS = 3_300L
     const val CONNECT_MS = 10_000L
     const val SILENCE_MS = 60_000L
+
+    // ---- GTA crash cuối stream ----
+    const val CRASH_MS = 8_500L
+    const val FREEZE_MS = 1_280L          // game đứng hình + âm thanh lặp trước khi nhoè tối
+    const val FREEZE_LOOP_MS = 160L       // đoạn âm thanh cuối được lặp lại (tiếng "rè" khi treo)
+    const val CRASH_TOTAL_MS = FREEZE_MS + CRASH_MS
+    const val CRASH_MIN_GAME_MS = 5_000L  // đoạn game cuối phải còn ít nhất chừng này sau khi cắt, nếu không bỏ qua crash
 
     fun uri(name: String): Uri = Uri.parse("asset:///clips/$name")
 }
@@ -45,6 +53,12 @@ data class RestSeg(
     /** Vị trí bắt đầu của đoạn này trên timeline (ms) – để overlay quy về thời gian tương đối. */
     val offsetMs: Long = 0L,
 ) : Seg
+
+/** Game đóng băng: giữ khung tại posMs, âm thanh là FREEZE_LOOP_MS cuối trước posMs lặp lại. */
+data class FreezeSeg(val src: Uri, val posMs: Long, override val durationMs: Long) : Seg
+
+/** Cảnh crash PS5 (clip bundle). Khung game đóng băng phủ lên rồi tối dần. offsetMs = vị trí bắt đầu trên timeline. */
+data class CrashSeg(override val durationMs: Long, val frozenSrc: Uri, val frozenPosMs: Long, val offsetMs: Long) : Seg
 
 data class ReactionSeg(val src: Uri, override val durationMs: Long, val dinner: Boolean) : Seg
 
@@ -97,7 +111,31 @@ data class Timeline(val segs: List<Seg>, val warnings: List<String>) {
                     }
                 }
             }
+            if (st.gtaCrashEnding) applyCrash(out, warnings)
             return Timeline(out, warnings.distinct())
+        }
+
+        /**
+         * Kết thúc bằng crash mà KHÔNG đổi tổng thời lượng: cắt CRASH_TOTAL_MS cuối của đoạn game cuối
+         * (nên điểm đóng băng nằm gần cuối chứ không phải giây cuối cùng của video game), rồi nối đóng băng + crash.
+         */
+        private fun applyCrash(out: MutableList<Seg>, warnings: MutableList<String>) {
+            val last = out.lastOrNull() as? GameSeg
+            if (last == null) {
+                warnings += "Bật GTA crash nhưng lịch không kết thúc bằng đoạn game – bỏ qua crash."
+                return
+            }
+            val keep = last.durationMs - Clips.CRASH_TOTAL_MS
+            if (keep < Clips.CRASH_MIN_GAME_MS) {
+                warnings += "Đoạn game cuối quá ngắn để chèn GTA crash – bỏ qua crash."
+                return
+            }
+            out.removeAt(out.lastIndex)
+            out += GameSeg(last.src, last.startMs, keep)
+            val pos = last.startMs + keep
+            out += FreezeSeg(last.src, pos, Clips.FREEZE_MS)
+            val offset = out.sumOf { it.durationMs }
+            out += CrashSeg(Clips.CRASH_MS, last.src, (pos - 40L).coerceAtLeast(0L), offset)
         }
 
         fun loops(durMs: Long): List<Seg> {

@@ -23,6 +23,8 @@ import androidx.media3.transformer.VideoEncoderSettings
 import com.google.common.collect.ImmutableList
 import com.vinny.streamcomposer.data.AssetSeg
 import com.vinny.streamcomposer.data.Clips
+import com.vinny.streamcomposer.data.CrashSeg
+import com.vinny.streamcomposer.data.FreezeSeg
 import com.vinny.streamcomposer.data.ExportSettings
 import com.vinny.streamcomposer.data.GameSeg
 import com.vinny.streamcomposer.data.MediaRef
@@ -67,10 +69,36 @@ object ExportEngine {
 
         val videoItems = ArrayList<EditedMediaItem>(job.timeline.segs.size)
         for (seg in job.timeline.segs) {
-            videoItems += when (seg) {
-                is GameSeg -> item(seg.src, seg.startMs, seg.startMs + seg.durationMs, common)
-                is AssetSeg -> item(Clips.uri(seg.file), 0L, seg.durationMs, common)
-                is RestSeg -> item(
+            when (seg) {
+                is GameSeg -> videoItems += item(seg.src, seg.startMs, seg.startMs + seg.durationMs, common)
+                is AssetSeg -> videoItems += item(Clips.uri(seg.file), 0L, seg.durationMs, common)
+                is FreezeSeg -> {
+                    // Hình: khung cuối phủ kín. Tiếng: FREEZE_LOOP_MS cuối của game lặp lại nhiều lần (âm thanh treo).
+                    val frozen = FrozenFrame(ctx, seg.src, (seg.posMs - 40L).coerceAtLeast(0L))
+                    val loop = Clips.FREEZE_LOOP_MS
+                    var left = seg.durationMs
+                    while (left > 0L) {
+                        val t = minOf(left, loop)
+                        val fx = common + OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                            LazyOverlay(SegClock(0L), { frozen.sharp }, { 1f })
+                        ))
+                        videoItems += item(seg.src, seg.posMs - loop, seg.posMs - loop + t, fx)
+                        left -= t
+                    }
+                }
+                is CrashSeg -> {
+                    // khung game đóng băng giữ nét 0,2 s rồi tối dần tới 0,45 s (nền clip lúc này đen), sau đó hiện màn lỗi PS5
+                    val frozen = FrozenFrame(ctx, seg.frozenSrc, seg.frozenPosMs)
+                    val clock = SegClock(seg.offsetMs * 1000L)
+                    val alpha = { t: Long -> 1f - ((t / 1_000_000f - 0.2f) / 0.25f).coerceIn(0f, 1f) }
+                    videoItems += item(
+                        Clips.uri(Clips.CRASH), 0L, seg.durationMs,
+                        common + OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                            LazyOverlay(clock, { frozen.sharp }, alpha, activeUntilUs = 500_000L)
+                        )),
+                    )
+                }
+                is RestSeg -> videoItems += item(
                     Clips.uri(Clips.REST_A), 0L, seg.durationMs,
                     common + OverlayEffect(RestOverlays.build(ctx, seg)),
                 )
@@ -93,7 +121,7 @@ object ExportEngine {
                             BitmapOverlay.createStaticBitmapOverlay(frame),
                         )
                     )
-                    item(seg.src, 0L, seg.durationMs, fx)
+                    videoItems += item(seg.src, 0L, seg.durationMs, fx)
                 }
             }
         }

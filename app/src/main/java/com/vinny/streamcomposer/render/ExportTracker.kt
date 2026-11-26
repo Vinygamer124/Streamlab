@@ -15,6 +15,8 @@ import android.os.HandlerThread
 import android.os.Looper
 import com.vinny.streamcomposer.data.AssetSeg
 import com.vinny.streamcomposer.data.Clips
+import com.vinny.streamcomposer.data.CrashSeg
+import com.vinny.streamcomposer.data.FreezeSeg
 import com.vinny.streamcomposer.data.GameSeg
 import com.vinny.streamcomposer.data.MediaRef
 import com.vinny.streamcomposer.data.ReactionSeg
@@ -22,7 +24,7 @@ import com.vinny.streamcomposer.data.RestSeg
 import com.vinny.streamcomposer.data.Seg
 
 /** Loại đoạn – mỗi loại có tốc độ render khác nhau nên ETA tính riêng theo loại. */
-enum class SegKind { GAME, REACTION, REST, CONNECT, COMEBACK }
+enum class SegKind { GAME, REACTION, REST, CONNECT, COMEBACK, CRASH }
 
 /** Một "khối" hiển thị cho người dùng (các đoạn loop 10 s liền nhau được gộp thành một khối). */
 data class SegInfo(val kind: SegKind, val title: String, val durationMs: Long)
@@ -36,6 +38,8 @@ object SegInfos {
                 is GameSeg -> SegInfo(SegKind.GAME, "Gameplay · ${names[s.src] ?: "video game"}", s.durationMs)
                 is ReactionSeg -> SegInfo(SegKind.REACTION, if (s.dinner) "Dinner reaction" else "Reaction", s.durationMs)
                 is RestSeg -> SegInfo(SegKind.REST, "Chuyển cảnh: menu GTA 6 → PS5 → Rest mode", s.durationMs)
+                is FreezeSeg -> SegInfo(SegKind.CRASH, "GTA crash: game đóng băng", s.durationMs)
+                is CrashSeg -> SegInfo(SegKind.CRASH, "GTA crash: lỗi PS5", s.durationMs)
                 is AssetSeg -> when (s.file) {
                     Clips.REST_B -> SegInfo(SegKind.REST, "Chuyển cảnh: Putting your PS5 into rest mode…", s.durationMs)
                     Clips.CONNECTING -> SegInfo(SegKind.CONNECT, "PS5 connecting…", s.durationMs)
@@ -172,6 +176,8 @@ class PreviewGrabber(private val ctx: Context, private val segs: List<Seg>) {
             is ReactionSeg -> frame(s.src, null, off)
             is AssetSeg -> frame(null, s.file, off.coerceAtMost(9_900L))
             is RestSeg -> restPlate(off)
+            is FreezeSeg -> frame(s.src, null, (s.posMs - 40L).coerceAtLeast(0L))
+            is CrashSeg -> frame(null, Clips.CRASH, off.coerceAtMost(Clips.CRASH_MS - 100L))
         }
     }
 

@@ -15,6 +15,8 @@ App phối nhanh live stream GTA 6 cho kênh **Vinny Gamer Official**.
 - Chuyển cảnh menu GTA 6 → PS5 → Rest mode: nền là khung game cuối (làm mờ) ghép dưới lớp UI đã tách nền (`assets/rest/*.webp` + `meta.json`),
   đồng hồ PS5 vẽ bằng code (`render/RestOverlays.kt`, font Fira Sans trong `assets/fonts/clock.ttf`) theo giờ live; âm thanh chỉ gồm âm giao diện (`clips/rest_a.mp4`, `rest_b.mp4`).
 - PS5 connecting/connected: `assets/clips/ps5_*.mp4`.
+- **GTA crash cuối stream (tuỳ chọn, mặc định tắt – màn Xuất)**: cắt `CRASH_TOTAL_MS` (9,78 s) cuối của đoạn game cuối rồi nối `FreezeSeg` (khung cuối giữ 1,28 s, âm thanh lặp 160 ms cuối → tiếng treo) + `CrashSeg` (`clips/ps5_crash.mp4` 8,5 s: tối dần → "Game or App Error" → "Report Problem", kèm âm thanh PS5; video dừng tại đây). Tổng thời lượng không đổi; điểm đóng băng nằm ~10 s trước giờ kết thúc, không dùng giây cuối của video game.
+- **Nơi lưu file**: `Movies/StreamComposer/` (thư viện máy). Android 11+ cần cấp "Truy cập mọi tệp" (nút trong màn Xuất); chưa cấp thì tạm lưu trong data của app như cũ.
 
 ## Tiến độ xuất & hiệu năng (bản sửa)
 - `render/ExportTracker.kt`: Media3 chỉ trả tiến độ SỐ NGUYÊN %, nên tracker nội suy 0,1%, cho biết đang ở khối nào (Game / Reaction / Rest mode / PS5 / Come back), ETA tính theo tốc độ riêng từng loại đoạn, và lấy khung nguồn xem trước mỗi ~3 s (chỉ khi màn Xuất đang mở).

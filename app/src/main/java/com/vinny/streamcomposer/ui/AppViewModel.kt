@@ -3,7 +3,9 @@ package com.vinny.streamcomposer.ui
 import android.app.Application
 import android.content.Intent
 import android.media.MediaMetadataRetriever
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.os.StatFs
 import android.provider.OpenableColumns
@@ -133,8 +135,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         StatFs(outDir().absolutePath).availableBytes
     } catch (e: Exception) { -1L }
 
-    private fun outDir(): File =
-        getApplication<Application>().getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: getApplication<Application>().filesDir
+    /** Có quyền ghi thẳng vào thư mục Movies công cộng không (Android 11+: "Truy cập mọi tệp"; Android ≤10: WRITE_EXTERNAL_STORAGE). */
+    fun canWritePublicMovies(): Boolean =
+        if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
+        else getApplication<Application>().checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+    /** Movies/StreamComposer nếu có quyền; nếu không thì rơi về thư mục Movies riêng của app (như trước). */
+    private fun outDir(): File {
+        if (canWritePublicMovies()) {
+            val d = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "StreamComposer")
+            if (d.isDirectory || d.mkdirs()) return d
+        }
+        return getApplication<Application>().getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: getApplication<Application>().filesDir
+    }
 
     fun timeline(): Timeline = Timeline.build(_plan.value, _res.value, _settings.value, _time.value.startMin)
 
@@ -202,6 +215,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .putBoolean("trans", _settings.value.transitions)
             .putBoolean("safe", _settings.value.safeMode)
             .putBoolean("gpuc", _settings.value.gpuContour)
+            .putBoolean("crash", _settings.value.gtaCrashEnding)
             .apply()
     }
 
@@ -223,6 +237,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 transitions = prefs.getBoolean("trans", true),
                 safeMode = prefs.getBoolean("safe", false),
                 gpuContour = prefs.getBoolean("gpuc", true),
+                gtaCrashEnding = prefs.getBoolean("crash", false),
             )
         } catch (_: Exception) {}
         autoPlan()

@@ -177,6 +177,10 @@ class ExportService : Service() {
     private fun finish(error: String?) {
         handler.removeCallbacks(poll)
         val bytes = outFile?.length() ?: 0L
+        if (error == null) outFile?.let { f ->
+            // báo cho Thư viện/Gallery thấy file mới trong Movies
+            try { android.media.MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), arrayOf("video/mp4"), null) } catch (_: Exception) {}
+        }
         ExportBus.state.value = ExportBus.state.value.copy(
             running = false, done = error == null, error = error,
             progress = if (error == null) 1f else ExportBus.state.value.progress,

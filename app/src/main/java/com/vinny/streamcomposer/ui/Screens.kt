@@ -1,7 +1,14 @@
 package com.vinny.streamcomposer.ui
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -386,6 +393,9 @@ private fun ExportScreen(vm: AppViewModel) {
         onDispose { ExportBus.wantPreview = false }
     }
     val tl = remember(plan, res, st) { vm.timeline() }
+    var moviesOk by remember { mutableStateOf(vm.canWritePublicMovies()) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { moviesOk = vm.canWritePublicMovies() }
+    val storagePerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { moviesOk = vm.canWritePublicMovies() }
     val estimate = vm.estimateBytes()
     val free = vm.freeBytes()
 
@@ -405,12 +415,26 @@ private fun ExportScreen(vm: AppViewModel) {
             colors = SliderDefaults.colors(thumbColor = Pal.amber, activeTrackColor = Pal.orange, inactiveTrackColor = Pal.panel2),
         )
         ToggleRow("Chuyển cảnh menu GTA 6 → rest mode → PS5 connected", st.transitions) { vm.updateSettings(st.copy(transitions = it)) }
+        ToggleRow("Kết thúc stream bằng GTA crash (đóng băng → lỗi PS5, video dừng ở màn lỗi) – tuỳ chọn", st.gtaCrashEnding) { vm.updateSettings(st.copy(gtaCrashEnding = it)) }
         ToggleRow("Contour reaction bằng GPU (shader) – nhanh; tắt nếu lỗi/hiển thị lạ", st.gpuContour) { vm.updateSettings(st.copy(gpuContour = it)) }
         ToggleRow("Chế độ an toàn (tắt contour + social, dùng để dò lỗi)", st.safeMode) { vm.updateSettings(st.copy(safeMode = it)) }
         Spacer(Modifier.height(8.dp))
         Label("Ước lượng trước khi xuất: ${fmtBytes(estimate)} · ổ trống: ${if (free >= 0) fmtBytes(free) else "?"}",
             color = if (free in 0 until estimate) Pal.bad else Pal.amber)
-        Label("Ghi thẳng vào file .mp4 trong thư mục Movies của app, không có file đệm trung gian.")
+        if (moviesOk) Label("Ghi thẳng vào Movies/StreamComposer (thư viện máy), không có file đệm trung gian.")
+        else {
+            Label("⚠ Chưa có quyền ghi vào thư mục Movies – đang lưu trong data của app (khó tìm).", color = Pal.amber)
+            Spacer(Modifier.height(6.dp))
+            ForgeButton("Cấp quyền lưu vào Movies", Modifier.fillMaxWidth(), primary = false) {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    try {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+                    } catch (e: Exception) {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                    }
+                } else storagePerm.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
     }
 
     if (tl.warnings.isNotEmpty() || res.games.isEmpty()) {
@@ -480,6 +504,7 @@ private fun kindColor(k: SegKind): Color = when (k) {
     SegKind.REST -> Color(0xFF6C8CFF)
     SegKind.CONNECT -> Color(0xFF4AA3DF)
     SegKind.COMEBACK -> Pal.ember
+    SegKind.CRASH -> Pal.bad
 }
 
 /** Bản đồ toàn bộ video: mỗi loại đoạn một màu, vạch trắng = vị trí đang render. */
@@ -500,7 +525,7 @@ private fun SegmentMap(layout: List<SegInfo>, progress: Float) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         listOf(
             SegKind.GAME to "Game", SegKind.REACTION to "Reaction", SegKind.REST to "Rest mode",
-            SegKind.CONNECT to "PS5", SegKind.COMEBACK to "Come back",
+            SegKind.CONNECT to "PS5", SegKind.COMEBACK to "Come back", SegKind.CRASH to "Crash",
         ).forEach { (k, name) ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Dot(kindColor(k))
