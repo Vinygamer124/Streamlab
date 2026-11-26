@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,6 +30,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,6 +39,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +63,8 @@ import com.vinny.streamcomposer.data.fmtDur
 import com.vinny.streamcomposer.data.title
 import com.vinny.streamcomposer.render.ExportBus
 import com.vinny.streamcomposer.render.ExportService
+import com.vinny.streamcomposer.render.SegInfo
+import com.vinny.streamcomposer.render.SegKind
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -369,6 +380,11 @@ private fun ExportScreen(vm: AppViewModel) {
     val plan by vm.plan.collectAsStateWithLifecycle()
     val res by vm.res.collectAsStateWithLifecycle()
     val ui by ExportBus.state.collectAsStateWithLifecycle()
+    val layout by ExportBus.layout.collectAsStateWithLifecycle()
+    DisposableEffect(Unit) {
+        ExportBus.wantPreview = true
+        onDispose { ExportBus.wantPreview = false }
+    }
     val tl = remember(plan, res, st) { vm.timeline() }
     val estimate = vm.estimateBytes()
     val free = vm.freeBytes()
@@ -389,6 +405,7 @@ private fun ExportScreen(vm: AppViewModel) {
             colors = SliderDefaults.colors(thumbColor = Pal.amber, activeTrackColor = Pal.orange, inactiveTrackColor = Pal.panel2),
         )
         ToggleRow("Chuyển cảnh menu GTA 6 → rest mode → PS5 connected", st.transitions) { vm.updateSettings(st.copy(transitions = it)) }
+        ToggleRow("Contour reaction bằng GPU (shader) – nhanh; tắt nếu lỗi/hiển thị lạ", st.gpuContour) { vm.updateSettings(st.copy(gpuContour = it)) }
         ToggleRow("Chế độ an toàn (tắt contour + social, dùng để dò lỗi)", st.safeMode) { vm.updateSettings(st.copy(safeMode = it)) }
         Spacer(Modifier.height(8.dp))
         Label("Ước lượng trước khi xuất: ${fmtBytes(estimate)} · ổ trống: ${if (free >= 0) fmtBytes(free) else "?"}",
@@ -407,8 +424,28 @@ private fun ExportScreen(vm: AppViewModel) {
         Title(if (ui.running) "Đang xuất…" else if (ui.done) "Xong!" else "Sẵn sàng")
         Spacer(Modifier.height(8.dp))
         PixelProgress(ui.progress)
+        if (layout.isNotEmpty() && (ui.running || ui.done)) {
+            Spacer(Modifier.height(6.dp))
+            SegmentMap(layout, if (ui.done) 1f else ui.progress)
+        }
         Spacer(Modifier.height(8.dp))
-        Label("${(ui.progress * 100).toInt()}%  ·  đã chạy ${fmtDur(ui.elapsedSec * 1000)}", color = Pal.text)
+        Label("${"%.1f".format(ui.progress * 100)}%  ·  đã chạy ${fmtDur(ui.elapsedSec * 1000)}", color = Pal.text)
+        if (ui.running && ui.segKind != null) {
+            Spacer(Modifier.height(6.dp))
+            Label("▶ Đang render: ${ui.segTitle}", color = Pal.amber)
+            Label("Khối ${ui.segIndex + 1}/${ui.segCount}  ·  ${fmtDur(ui.segPosMs)} / ${fmtDur(ui.segDurMs)}  ·  giờ live ${ui.streamClock}", color = Pal.text)
+            Spacer(Modifier.height(4.dp))
+            PixelProgress(if (ui.segDurMs > 0) ui.segPosMs.toFloat() / ui.segDurMs else 0f, segments = 24)
+            if (ui.segSpeedX > 0f) Label("Tốc độ riêng của đoạn này: ${"%.2f".format(ui.segSpeedX)}× thời gian thực", color = Pal.muted)
+            ui.preview?.let { bmp ->
+                Spacer(Modifier.height(8.dp))
+                Image(
+                    bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Pal.bg),
+                )
+                Label("Khung nguồn đang xử lý: ${ui.previewCaption}", color = Pal.muted)
+            }
+        }
         if (ui.running) {
             val etaTxt = if (ui.etaSec >= 0) "còn ${fmtDur(ui.etaSec * 1000)} · xong lúc " +
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + ui.etaSec * 1000)) else "đang đo…"
@@ -433,6 +470,42 @@ private fun ExportScreen(vm: AppViewModel) {
             ForgeButton("Huỷ xuất", Modifier.fillMaxWidth(), primary = false) { ExportService.cancel(ctx) }
         } else {
             ForgeButton("Bắt đầu xuất", Modifier.fillMaxWidth(), enabled = plan.isNotEmpty() && res.games.isNotEmpty()) { vm.startExport() }
+        }
+    }
+}
+
+private fun kindColor(k: SegKind): Color = when (k) {
+    SegKind.GAME -> Pal.muted
+    SegKind.REACTION -> Pal.orange
+    SegKind.REST -> Color(0xFF6C8CFF)
+    SegKind.CONNECT -> Color(0xFF4AA3DF)
+    SegKind.COMEBACK -> Pal.ember
+}
+
+/** Bản đồ toàn bộ video: mỗi loại đoạn một màu, vạch trắng = vị trí đang render. */
+@Composable
+private fun SegmentMap(layout: List<SegInfo>, progress: Float) {
+    val total = layout.sumOf { it.durationMs }.coerceAtLeast(1L).toFloat()
+    Canvas(Modifier.fillMaxWidth().height(20.dp)) {
+        var x = 0f
+        for (b in layout) {
+            val w = size.width * (b.durationMs / total)
+            drawRect(kindColor(b.kind), topLeft = Offset(x, 0f), size = Size(maxOf(w - 0.5f, 0.5f), size.height))
+            x += w
+        }
+        val px = size.width * progress.coerceIn(0f, 1f)
+        drawRect(Color.White, topLeft = Offset((px - 1.5f).coerceAtLeast(0f), 0f), size = Size(3f, size.height))
+    }
+    Spacer(Modifier.height(4.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        listOf(
+            SegKind.GAME to "Game", SegKind.REACTION to "Reaction", SegKind.REST to "Rest mode",
+            SegKind.CONNECT to "PS5", SegKind.COMEBACK to "Come back",
+        ).forEach { (k, name) ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Dot(kindColor(k))
+                Text(name, color = Pal.muted, fontSize = 11.sp)
+            }
         }
     }
 }

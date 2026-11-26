@@ -42,6 +42,8 @@ data class RestSeg(
     val clockMin: Int,
     val frozenSrc: Uri?,
     val frozenPosMs: Long,
+    /** Vị trí bắt đầu của đoạn này trên timeline (ms) – để overlay quy về thời gian tương đối. */
+    val offsetMs: Long = 0L,
 ) : Seg
 
 data class ReactionSeg(val src: Uri, override val durationMs: Long, val dinner: Boolean) : Seg
@@ -76,6 +78,7 @@ data class Timeline(val segs: List<Seg>, val warnings: List<String>) {
                         out += RestSeg(
                             Clips.REST_A_MS, clock,
                             g?.src, ((g?.let { it.startMs + it.durationMs } ?: 0L) - 120L).coerceAtLeast(0L),
+                            offsetMs = breakStartMs,
                         )
                         out += AssetSeg(Clips.REST_B, Clips.REST_B_MS)
                     }

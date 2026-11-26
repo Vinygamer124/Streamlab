@@ -10,6 +10,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
@@ -37,6 +38,7 @@ data class ExportJob(
     val resources: Resources,
     val settings: ExportSettings,
     val outputPath: String,
+    val streamStartMin: Int = 20 * 60,
 )
 
 /**
@@ -74,18 +76,22 @@ object ExportEngine {
                 )
                 is ReactionSeg -> {
                     val frame = if (seg.dinner) frameDinner else frameLunch
-                    val fx = listOf(
-                                    Presentation.createForWidthAndHeight(OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP),
-                        ReactionWindow.matrix(),
-                        // thứ tự: contour (dưới) -> khung (trên). Mỗi item có ContourOverlay riêng để thread-safe.
-                        OverlayEffect(
-                            if (job.settings.safeMode) ImmutableList.of<androidx.media3.effect.TextureOverlay>(
-                                BitmapOverlay.createStaticBitmapOverlay(frame),
-                            ) else ImmutableList.of<androidx.media3.effect.TextureOverlay>(
-                                ContourOverlay.forReactionWindow(),
-                                BitmapOverlay.createStaticBitmapOverlay(frame),
-                            )
-                        ),
+                    val gpu = job.settings.gpuContour && !job.settings.safeMode
+                    val fx = ArrayList<Effect>()
+                    // video reaction hay là 60 fps: ép về 30 fps ngay đầu chuỗi để contour/khung/encoder chỉ xử lý một nửa số khung
+                    fx += FrameDropEffect.createDefaultFrameDropEffect(30f)
+                    fx += Presentation.createForWidthAndHeight(OUT_W, OUT_H, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP)
+                    fx += ReactionWindow.matrix()
+                    // contour GPU: shader tính trực tiếp trên khung đã thu vào cửa sổ (dưới khung PNG)
+                    if (gpu) fx += ContourEffect.forReactionWindow()
+                    // thứ tự overlay: contour CPU (dưới, chỉ khi không dùng GPU) -> khung (trên). Mỗi item có overlay riêng để thread-safe.
+                    fx += OverlayEffect(
+                        if (job.settings.safeMode || gpu) ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                            BitmapOverlay.createStaticBitmapOverlay(frame),
+                        ) else ImmutableList.of<androidx.media3.effect.TextureOverlay>(
+                            ContourOverlay.forReactionWindow(),
+                            BitmapOverlay.createStaticBitmapOverlay(frame),
+                        )
                     )
                     item(seg.src, 0L, seg.durationMs, fx)
                 }

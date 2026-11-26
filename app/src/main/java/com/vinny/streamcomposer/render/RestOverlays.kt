@@ -152,31 +152,50 @@ class FrozenFrame(private val ctx: Context, private val src: Uri?, private val p
     }
 }
 
+/**
+ * Media3 đưa cho overlay `presentationTimeUs` theo THỜI GIAN CỦA CẢ COMPOSITION (đã cộng độ dời của các đoạn trước),
+ * không phải thời gian từ đầu đoạn. Với Rest mode nằm giữa stream, t luôn lớn hơn 4,6 s nên `frameAt()` bị kẹt ở
+ * khung cuối -> người xem chỉ thấy tấm "Putting your P…" mờ thay vì menu GTA → PS5 → Rest.
+ * SegClock đổi về thời gian tương đối (0 = khung đầu của đoạn), chạy đúng cả khi Media3 đã cho thời gian tương đối.
+ */
+class SegClock(private val offsetUs: Long) {
+    private var base = Long.MIN_VALUE
+
+    @Synchronized
+    fun rel(tUs: Long): Long {
+        // đoạn Rest luôn nằm sau mở màn >= 3 phút nên offset >> 4,6 s: phân biệt được hai kiểu thời gian
+        if (offsetUs > 1_000_000L && tUs < offsetUs - 1_000_000L) return tUs.coerceAtLeast(0L)
+        if (base == Long.MIN_VALUE) base = tUs
+        return (tUs - base).coerceAtLeast(0L)
+    }
+}
+
 private val BLANK: Bitmap by lazy { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888) }
 
 /** Bitmap tạo lười, tuỳ chọn alpha theo thời gian; trả bitmap trong suốt khi hết hiệu lực. */
 @UnstableApi
 class LazyOverlay(
+    private val clock: SegClock,
     private val bitmap: () -> Bitmap,
     private val alpha: (Long) -> Float,
     private val activeUntilUs: Long = Long.MAX_VALUE,
 ) : BitmapOverlay() {
     override fun getBitmap(presentationTimeUs: Long): Bitmap =
-        if (presentationTimeUs > activeUntilUs) BLANK else bitmap()
+        if (clock.rel(presentationTimeUs) > activeUntilUs) BLANK else bitmap()
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings =
-        OverlaySettings.Builder().setAlphaScale(alpha(presentationTimeUs).coerceIn(0f, 1f)).build()
+        OverlaySettings.Builder().setAlphaScale(alpha(clock.rel(presentationTimeUs)).coerceIn(0f, 1f)).build()
 }
 
 /** UI GTA/PS5 (plate WebP có alpha, premultiplied khi Android giải mã) – chọn khung theo thời gian. */
 @UnstableApi
-class PlateOverlay(private val ctx: Context, private val meta: RestMeta) : BitmapOverlay() {
+class PlateOverlay(private val ctx: Context, private val meta: RestMeta, private val clock: SegClock) : BitmapOverlay() {
     private var lastIdx = Int.MIN_VALUE
     private var lastBmp: Bitmap = BLANK
 
     @Synchronized
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
-        val idx = meta.map[meta.frameAt(presentationTimeUs)]
+        val idx = meta.map[meta.frameAt(clock.rel(presentationTimeUs))]
         if (idx == lastIdx) return lastBmp
         lastBmp = if (idx < 0) BLANK else try {
             val o = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
@@ -202,6 +221,7 @@ object RestOverlays {
     /** Danh sách overlay (dưới → trên) cho phần đầu chuyển cảnh. */
     fun build(ctx: Context, seg: com.vinny.streamcomposer.data.RestSeg): ImmutableList<TextureOverlay> {
         val meta = RestMeta(ctx)
+        val clock = SegClock(seg.offsetMs * 1000L)
         val frozen = FrozenFrame(ctx, seg.frozenSrc, seg.frozenPosMs)
 
         // game nét → mờ dần (0,3–0,6 s)
@@ -211,13 +231,13 @@ object RestOverlays {
         }
         val text = PS5Clock.format(seg.clockMin)
         val clockBmp by lazy { drawClock(ctx, meta, text) }
-        val clockAlpha = { t: Long -> meta.clockAlpha[meta.frameAt(t)] }
+        val clockAlpha = { t: Long -> meta.clockAlpha[meta.frameAt(t)] } // t đã là thời gian tương đối (LazyOverlay quy đổi)
 
         return ImmutableList.of<TextureOverlay>(
-            LazyOverlay({ frozen.blurred }, { 1f }),
-            LazyOverlay({ frozen.sharp }, sharpAlpha, activeUntilUs = 700_000L),
-            PlateOverlay(ctx, meta),
-            LazyOverlay({ clockBmp }, clockAlpha),
+            LazyOverlay(clock, { frozen.blurred }, { 1f }),
+            LazyOverlay(clock, { frozen.sharp }, sharpAlpha, activeUntilUs = 700_000L),
+            PlateOverlay(ctx, meta, clock),
+            LazyOverlay(clock, { clockBmp }, clockAlpha),
         )
     }
 

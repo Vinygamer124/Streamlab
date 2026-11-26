@@ -21,6 +21,9 @@ import kotlin.math.sin
 const val OUT_W = 1920
 const val OUT_H = 1080
 
+/** Tốc độ làm mới contour khi xuất (khung/giây). 10 là mượt với chuyển động chậm; tăng lên 15–30 nếu thấy giật. */
+const val CONTOUR_FPS = 10f
+
 /** Cửa sổ trong suốt của khung reaction (px trên ảnh 1920x1080): x 64..1463, y 174..961. */
 object ReactionWindow {
     const val LEFT = 64f
@@ -149,15 +152,24 @@ private class FloatBuf {
  * vì Media3 chỉ upload lại texture khi instance bitmap đổi.
  */
 @UnstableApi
-class ContourOverlay(private val r: ContourRenderer) : BitmapOverlay() {
+class ContourOverlay(private val r: ContourRenderer, private val fps: Float = CONTOUR_FPS) : BitmapOverlay() {
     private val pool = Array(3) { Bitmap.createBitmap(r.width, r.height, Bitmap.Config.ARGB_8888) }
     private var idx = 0
+    private var lastStep = Long.MIN_VALUE
 
+    /**
+     * Trước đây vẽ lại contour (marching squares + vẽ 960x540 bằng CPU + upload texture) ở MỌI khung 30 fps –
+     * đây là phần làm đoạn reaction chậm gấp ~4 lần. Trường độ cao đổi rất chậm (chu kỳ 20 s) nên chỉ cần
+     * làm mới ở [fps] khung/giây; các khung giữa trả lại ĐÚNG bitmap cũ nên Media3 cũng không upload lại texture.
+     */
     @Synchronized
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
+        val step = (presentationTimeUs / 1_000_000.0 * fps).toLong()
+        if (step == lastStep) return pool[idx]
+        lastStep = step
         idx = (idx + 1) % pool.size
         val b = pool[idx]
-        r.draw(b, presentationTimeUs / 1_000_000f)
+        r.draw(b, step / fps)
         return b
     }
 

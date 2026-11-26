@@ -141,7 +141,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun startExport() {
         val tl = timeline()
         val name = "Live_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date()) + ".mp4"
-        ExportBus.pending = ExportJob(tl, _res.value, _settings.value, File(outDir(), name).absolutePath)
+        ExportBus.pending = ExportJob(tl, _res.value, _settings.value, File(outDir(), name).absolutePath, _time.value.startMin)
         ExportService.start(getApplication())
     }
 
@@ -201,6 +201,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .putBoolean("frag", _settings.value.fragmentedMp4)
             .putBoolean("trans", _settings.value.transitions)
             .putBoolean("safe", _settings.value.safeMode)
+            .putBoolean("gpuc", _settings.value.gpuContour)
             .apply()
     }
 
@@ -221,6 +222,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 fragmentedMp4 = prefs.getBoolean("frag", false),
                 transitions = prefs.getBoolean("trans", true),
                 safeMode = prefs.getBoolean("safe", false),
+                gpuContour = prefs.getBoolean("gpuc", true),
             )
         } catch (_: Exception) {}
         autoPlan()

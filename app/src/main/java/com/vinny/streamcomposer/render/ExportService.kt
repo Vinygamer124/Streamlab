@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -24,6 +25,8 @@ import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import com.vinny.streamcomposer.MainActivity
 import com.vinny.streamcomposer.R
+import com.vinny.streamcomposer.data.MIN_MS
+import com.vinny.streamcomposer.data.fmtClock
 import com.vinny.streamcomposer.data.fmtDur
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.File
@@ -40,31 +43,26 @@ data class ExportUi(
     val error: String? = null,
     val outputPath: String? = null,
     val codecNote: String = "",
+    // --- đang render tới đâu ---
+    val segIndex: Int = -1,
+    val segCount: Int = 0,
+    val segTitle: String = "",
+    val segKind: SegKind? = null,
+    val segPosMs: Long = 0,
+    val segDurMs: Long = 0,
+    val segSpeedX: Float = 0f,       // tốc độ của riêng loại đoạn đang chạy (× thời gian thực)
+    val streamClock: String = "",    // giờ trên đồng hồ live tương ứng vị trí đang render
+    val preview: Bitmap? = null,
+    val previewCaption: String = "",
 )
 
 object ExportBus {
     val state = MutableStateFlow(ExportUi())
+    /** Bản đồ các khối của timeline (để vẽ thanh phân đoạn). */
+    val layout = MutableStateFlow<List<SegInfo>>(emptyList())
     @Volatile var pending: ExportJob? = null
-}
-
-/** ETA dựa trên tốc độ trong cửa sổ 90 giây gần nhất, trộn với tốc độ trung bình toàn quá trình. */
-class EtaEstimator {
-    private val win = ArrayDeque<Pair<Long, Float>>()
-    private var t0 = 0L
-    fun reset() { win.clear(); t0 = 0L }
-    fun add(nowMs: Long, p: Float) {
-        if (t0 == 0L) t0 = nowMs
-        win.addLast(nowMs to p)
-        while (win.size > 2 && nowMs - win.first().first > 90_000) win.removeFirst()
-    }
-    fun etaSec(): Long {
-        if (win.size < 2) return -1
-        val (ta, pa) = win.first(); val (tb, pb) = win.last()
-        val recent = if (tb > ta) (pb - pa) / (tb - ta) else 0f
-        val overall = if (tb > t0) pb / (tb - t0) else 0f
-        val v = if (recent > 0f && overall > 0f) 0.6f * recent + 0.4f * overall else maxOf(recent, overall)
-        return if (v <= 0f) -1 else (((1f - pb) / v) / 1000f).toLong()
-    }
+    /** UI bật khi màn Xuất đang mở – tránh tốn CPU lấy khung hình xem trước lúc không ai nhìn. */
+    @Volatile var wantPreview = false
 }
 
 @UnstableApi
@@ -72,7 +70,11 @@ class ExportService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var transformer: Transformer? = null
     private var wake: PowerManager.WakeLock? = null
-    private val eta = EtaEstimator()
+    private var tracker: ExportTracker? = null
+    private var grabber: PreviewGrabber? = null
+    private var streamStartMin = 20 * 60
+    private var lastPreviewAt = 0L
+    private var lastPreviewBlock = -1
     private var startedAt = 0L
     private var totalMs = 1L
     private var outFile: File? = null
@@ -101,9 +103,15 @@ class ExportService : Service() {
 
         totalMs = job.timeline.totalMs.coerceAtLeast(1)
         outFile = File(job.outputPath).also { it.parentFile?.mkdirs(); if (it.exists()) it.delete() }
-        eta.reset()
         startedAt = SystemClock.elapsedRealtime()
-        ExportBus.state.value = ExportUi(running = true, outputPath = job.outputPath)
+        val infos = SegInfos.build(job.timeline.segs, job.resources.games)
+        tracker = ExportTracker(infos, totalMs, startedAt)
+        grabber = PreviewGrabber(this, job.timeline.segs)
+        streamStartMin = job.streamStartMin
+        lastPreviewAt = 0L
+        lastPreviewBlock = -1
+        ExportBus.layout.value = infos
+        ExportBus.state.value = ExportUi(running = true, outputPath = job.outputPath, segCount = infos.size)
 
         try {
             val composition = ExportEngine.buildComposition(this, job)
@@ -122,23 +130,37 @@ class ExportService : Service() {
     private val poll = object : Runnable {
         override fun run() {
             val tr = transformer ?: return
+            val trk = tracker ?: return
             val now = SystemClock.elapsedRealtime()
             val state = tr.getProgress(holder)
             val bytes = outFile?.length() ?: 0L
             val elapsed = (now - startedAt) / 1000
-            if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                val p = (holder.progress / 100f).coerceIn(0f, 1f)
-                eta.add(now, p)
-                val predicted = if (p > 0.01f) (bytes / p).toLong() else -1L
-                val speed = if (elapsed > 0) (p * totalMs / 1000f) / elapsed else 0f
-                val e = eta.etaSec()
-                ExportBus.state.value = ExportBus.state.value.copy(
-                    running = true, progress = p, etaSec = e, elapsedSec = elapsed,
-                    bytes = bytes, predictedBytes = predicted, speedX = speed,
+            val available = state == Transformer.PROGRESS_STATE_AVAILABLE
+            // holder.progress chỉ là số nguyên 0..100 → tracker nội suy thành tiến độ mịn + biết đang ở khối nào
+            val s = trk.update(now, if (available) holder.progress else 0)
+            val blk = trk.blocks[s.blockIndex]
+            val predicted = if (s.progress > 0.01f) (bytes / s.progress).toLong() else -1L
+            val speed = if (elapsed > 0) (s.progress * totalMs / 1000f) / elapsed else 0f
+            ExportBus.state.value = ExportBus.state.value.copy(
+                running = true, progress = s.progress, etaSec = s.etaSec, elapsedSec = elapsed,
+                bytes = bytes, predictedBytes = predicted, speedX = speed,
+                segIndex = s.blockIndex, segCount = trk.blocks.size, segTitle = blk.title, segKind = blk.kind,
+                segPosMs = s.blockPosMs, segDurMs = blk.durationMs, segSpeedX = s.segSpeedX,
+                streamClock = fmtClock(streamStartMin + (s.posMs / MIN_MS).toInt()),
+            )
+            if (available) {
+                updateNotif(
+                    "${blk.title} · ${"%.1f".format(s.progress * 100)}% · còn ${if (s.etaSec >= 0) fmtDur(s.etaSec * 1000) else "…"}",
+                    (s.progress * 100).toInt(),
                 )
-                updateNotif("${(p * 100).toInt()}% · còn ${if (e >= 0) fmtDur(e * 1000) else "…"}", (p * 100).toInt())
-            } else {
-                ExportBus.state.value = ExportBus.state.value.copy(elapsedSec = elapsed, bytes = bytes)
+            }
+            if (ExportBus.wantPreview && (now - lastPreviewAt >= 3000L || s.blockIndex != lastPreviewBlock)) {
+                lastPreviewAt = now
+                lastPreviewBlock = s.blockIndex
+                val caption = "${blk.title} · ${fmtDur(s.blockPosMs)} / ${fmtDur(blk.durationMs)}"
+                grabber?.request(s.posMs) { bmp ->
+                    ExportBus.state.value = ExportBus.state.value.copy(preview = bmp, previewCaption = caption)
+                }
             }
             handler.postDelayed(this, 1000)
         }
@@ -181,6 +203,8 @@ class ExportService : Service() {
         wake?.let { if (it.isHeld) it.release() }
         wake = null
         transformer = null
+        grabber?.release(); grabber = null
+        tracker = null
         ExportBus.pending = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()

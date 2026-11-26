@@ -64,6 +64,7 @@ data class ExportSettings(
     val fragmentedMp4: Boolean = false,
     val transitions: Boolean = true,
     val safeMode: Boolean = false, // chẩn đoán: tắt overlay contour + social
+    val gpuContour: Boolean = true, // contour bằng fragment shader (GPU); tắt = vẽ bitmap bằng CPU như bản cũ
 )
 
 data class StreamTime(val startMin: Int = 20 * 60, val endMin: Int = 23 * 60) {

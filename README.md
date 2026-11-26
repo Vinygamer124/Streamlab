@@ -16,6 +16,12 @@ App phối nhanh live stream GTA 6 cho kênh **Vinny Gamer Official**.
   đồng hồ PS5 vẽ bằng code (`render/RestOverlays.kt`, font Fira Sans trong `assets/fonts/clock.ttf`) theo giờ live; âm thanh chỉ gồm âm giao diện (`clips/rest_a.mp4`, `rest_b.mp4`).
 - PS5 connecting/connected: `assets/clips/ps5_*.mp4`.
 
+## Tiến độ xuất & hiệu năng (bản sửa)
+- `render/ExportTracker.kt`: Media3 chỉ trả tiến độ SỐ NGUYÊN %, nên tracker nội suy 0,1%, cho biết đang ở khối nào (Game / Reaction / Rest mode / PS5 / Come back), ETA tính theo tốc độ riêng từng loại đoạn, và lấy khung nguồn xem trước mỗi ~3 s (chỉ khi màn Xuất đang mở).
+- Contour reaction mặc định chạy bằng **fragment shader** (`render/ContourEffect.kt`, `BaseGlShaderProgram`): mỗi pixel trong cửa sổ reaction tự tính khoảng cách tới đường đồng mức, không còn vẽ bitmap/upload texture ở CPU. Công tắc "Contour reaction bằng GPU" trong màn Xuất; tắt thì quay về bản CPU (`ContourOverlay`, làm mới `CONTOUR_FPS` = 10 khung/giây).
+- Reaction ép về 30 fps bằng `FrameDropEffect` trước khi vào hiệu ứng.
+- Rest mode: overlay nhận thời gian theo composition → `SegClock` quy về thời gian tương đối của đoạn (xem `RestOverlays.kt`).
+
 ## Build
 CI: `.github/workflows/android.yml` (Actions → artifact APK debug).
 Local: Android Studio Koala+ / JDK 17, hoặc `gradle :app:assembleDebug` (Gradle 8.9).
