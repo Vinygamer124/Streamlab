@@ -11,11 +11,20 @@ android {
         applicationId = "com.vinny.streamcomposer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
+        versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
+    }
+    signingConfigs {
+        create("fixed") {
+            storeFile = file("release.jks")
+            storePassword = "streamlab"
+            keyAlias = "key"
+            keyPassword = "streamlab"
+        }
     }
     buildTypes {
-        release { isMinifyEnabled = false }
+        debug { signingConfig = signingConfigs.getByName("fixed") }
+        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("fixed") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
