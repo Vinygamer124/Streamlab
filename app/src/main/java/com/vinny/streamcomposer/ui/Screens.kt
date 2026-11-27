@@ -458,7 +458,8 @@ private fun ExportScreen(vm: AppViewModel) {
             Label("Khối ${ui.segIndex + 1}/${ui.segCount}  ·  ${fmtDur(ui.segPosMs)} / ${fmtDur(ui.segDurMs)}  ·  giờ live ${ui.streamClock}", color = Pal.text)
             Spacer(Modifier.height(4.dp))
             PixelProgress(if (ui.segDurMs > 0) ui.segPosMs.toFloat() / ui.segDurMs else 0f, segments = 24)
-            if (ui.segSpeedX > 0f) Label("Tốc độ riêng của đoạn này: ${"%.2f".format(ui.segSpeedX)}× thời gian thực", color = Pal.muted)
+            if (ui.warmup) Label("⏳ Đang chuẩn bị đoạn này (tua video nguồn tới điểm cắt, giải mã bỏ các khung phía trước). File tạm ít tăng là bình thường – máy không treo, sẽ tự nhanh lại.", color = Pal.amber)
+            else if (ui.segSpeedX > 0f) Label("Tốc độ riêng của đoạn này: ${"%.2f".format(ui.segSpeedX)}× thời gian thực", color = Pal.muted)
             ui.preview?.let { bmp ->
                 Spacer(Modifier.height(8.dp))
                 Image(
@@ -469,10 +470,10 @@ private fun ExportScreen(vm: AppViewModel) {
             }
         }
         if (ui.running) {
-            val etaTxt = if (ui.etaSec >= 0) "còn ${fmtDur(ui.etaSec * 1000)} · xong lúc " +
+            val etaTxt = if (ui.etaSec >= 0) "còn ${if (ui.etaApprox) "~" else ""}${fmtDur(ui.etaSec * 1000)}${if (ui.etaApprox) " (ước lượng thô)" else ""} · xong lúc " +
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(System.currentTimeMillis() + ui.etaSec * 1000)) else "đang đo…"
             Label("ETA: $etaTxt", color = Pal.amber)
-            Label("Tốc độ: ${"%.2f".format(ui.speedX)}× thời gian thực", color = Pal.text)
+            Label("Tốc độ trung bình: ${"%.2f".format(ui.speedX)}× thời gian thực", color = Pal.text)
             Label("File hiện tại: ${fmtBytes(ui.bytes)}  →  dự đoán cuối: ${if (ui.predictedBytes > 0) fmtBytes(ui.predictedBytes) else "…"}", color = Pal.amber)
         }
         ui.error?.let { Label("✕ $it", color = Pal.bad) }

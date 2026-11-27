@@ -52,6 +52,8 @@ data class ExportUi(
     val segDurMs: Long = 0,
     val segSpeedX: Float = 0f,       // tốc độ của riêng loại đoạn đang chạy (× thời gian thực)
     val streamClock: String = "",    // giờ trên đồng hồ live tương ứng vị trí đang render
+    val warmup: Boolean = false,     // đang tua/khởi động nguồn của đoạn mới
+    val etaApprox: Boolean = false,  // ETA còn ước lượng thô
     val preview: Bitmap? = null,
     val previewCaption: String = "",
 )
@@ -137,20 +139,20 @@ class ExportService : Service() {
             val elapsed = (now - startedAt) / 1000
             val available = state == Transformer.PROGRESS_STATE_AVAILABLE
             // holder.progress chỉ là số nguyên 0..100 → tracker nội suy thành tiến độ mịn + biết đang ở khối nào
-            val s = trk.update(now, if (available) holder.progress else 0)
+            val s = trk.update(now, if (available) holder.progress else 0, bytes)
             val blk = trk.blocks[s.blockIndex]
-            val predicted = if (s.progress > 0.01f) (bytes / s.progress).toLong() else -1L
+            val predicted = s.predictedBytes
             val speed = if (elapsed > 0) (s.progress * totalMs / 1000f) / elapsed else 0f
             ExportBus.state.value = ExportBus.state.value.copy(
                 running = true, progress = s.progress, etaSec = s.etaSec, elapsedSec = elapsed,
                 bytes = bytes, predictedBytes = predicted, speedX = speed,
                 segIndex = s.blockIndex, segCount = trk.blocks.size, segTitle = blk.title, segKind = blk.kind,
-                segPosMs = s.blockPosMs, segDurMs = blk.durationMs, segSpeedX = s.segSpeedX,
+                segPosMs = s.blockPosMs, segDurMs = blk.durationMs, segSpeedX = s.segSpeedX, warmup = s.warmup, etaApprox = s.etaApprox,
                 streamClock = fmtClock(streamStartMin + (s.posMs / MIN_MS).toInt()),
             )
             if (available) {
                 updateNotif(
-                    "${blk.title} · ${"%.1f".format(s.progress * 100)}% · còn ${if (s.etaSec >= 0) fmtDur(s.etaSec * 1000) else "…"}",
+                    "${blk.title}${if (s.warmup) " (đang chuẩn bị đoạn)" else ""} · ${"%.1f".format(s.progress * 100)}% · còn ${if (s.etaSec >= 0) (if (s.etaApprox) "~" else "") + fmtDur(s.etaSec * 1000) else "…"}",
                     (s.progress * 100).toInt(),
                 )
             }

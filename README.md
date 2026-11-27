@@ -20,6 +20,7 @@ App phối nhanh live stream GTA 6 cho kênh **Vinny Gamer Official**.
 
 ## Tiến độ xuất & hiệu năng (bản sửa)
 - `render/ExportTracker.kt`: Media3 chỉ trả tiến độ SỐ NGUYÊN %, nên tracker nội suy 0,1%, cho biết đang ở khối nào (Game / Reaction / Rest mode / PS5 / Come back), ETA tính theo tốc độ riêng từng loại đoạn, và lấy khung nguồn xem trước mỗi ~3 s (chỉ khi màn Xuất đang mở).
+- Pha khởi động đoạn: vào khối mới (nhất là Game cắt giữa video dài) bộ giải mã phải tua về keyframe gần nhất và giải mã bỏ các khung trước điểm cắt nên tốc độ tụt rất thấp, file gần như không lớn. Tracker nhận biết (`warmup`), không tính vào tốc độ đo, không nội suy chạy trước, UI báo "đang chuẩn bị đoạn"; ETA chỉ chính xác khi mọi loại đoạn còn lại đã đo (có dấu `~`), dung lượng dự đoán tính theo byte/ms riêng từng loại.
 - Contour reaction mặc định chạy bằng **fragment shader** (`render/ContourEffect.kt`, `BaseGlShaderProgram`): mỗi pixel trong cửa sổ reaction tự tính khoảng cách tới đường đồng mức, không còn vẽ bitmap/upload texture ở CPU. Công tắc "Contour reaction bằng GPU" trong màn Xuất; tắt thì quay về bản CPU (`ContourOverlay`, làm mới `CONTOUR_FPS` = 10 khung/giây).
 - Reaction ép về 30 fps bằng `FrameDropEffect` trước khi vào hiệu ứng.
 - Rest mode: overlay nhận thời gian theo composition → `SegClock` quy về thời gian tương đối của đoạn (xem `RestOverlays.kt`).
