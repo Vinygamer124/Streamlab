@@ -44,11 +44,16 @@ object SegInfos {
                     Clips.REST_B -> SegInfo(SegKind.REST, "Chuyển cảnh: Putting your PS5 into rest mode…", s.durationMs)
                     Clips.CONNECTING -> SegInfo(SegKind.CONNECT, "PS5 connecting…", s.durationMs)
                     Clips.CONNECTED -> SegInfo(SegKind.CONNECT, "PS5 connected", s.durationMs)
+                    Clips.CRASH_HOLD -> SegInfo(SegKind.CRASH, "GTA crash: màn Report Problem (nền loop)", s.durationMs)
+                    Clips.STARTING_SOON -> SegInfo(SegKind.COMEBACK, "Starting soon", s.durationMs)
+                    Clips.BE_RIGHT_BACK -> SegInfo(SegKind.COMEBACK, "Be right back", s.durationMs)
+                    Clips.THANKS -> SegInfo(SegKind.COMEBACK, "Thanks for watching", s.durationMs)
                     else -> SegInfo(SegKind.COMEBACK, "Come back soon", s.durationMs)
                 }
             }
             val last = out.lastOrNull()
-            if (last != null && last.kind == info.kind && last.title == info.title && info.kind == SegKind.COMEBACK) {
+            if (last != null && last.kind == info.kind && last.title == info.title &&
+                (info.kind == SegKind.COMEBACK || info.kind == SegKind.CRASH)) {
                 out[out.size - 1] = last.copy(durationMs = last.durationMs + info.durationMs)
             } else out += info
         }
@@ -61,28 +66,18 @@ object SegInfos {
  * nên con số đứng yên rất lâu. Tracker này:
  *  - nội suy tiến độ mịn (0,1%) giữa hai lần số nguyên nhảy, dựa trên tốc độ đo được của đúng loại đoạn đang chạy;
  *  - cho biết đang ở khối nào (Game / Reaction / Rest mode / …) và vị trí trong khối;
- *  - ETA = cộng thời gian còn lại của TỪNG khối theo tốc độ riêng của loại đó (loại chưa đo được thì ước lượng thô, đánh dấu `etaApprox`);
- *  - nhận biết pha KHỞI ĐỘNG đoạn (`warmup`): khi vào một khối mới (nhất là Game cắt giữa video dài) bộ giải mã phải tua về keyframe
- *    gần nhất rồi giải mã bỏ các khung trước điểm cắt → encoder chưa có khung để ghi, tốc độ tụt rất thấp (vd 0,24×), file gần như không
- *    lớn thêm, rồi tự nhanh lại. Đây KHÔNG phải tốc độ thật của đoạn, nên: không đưa vào ước lượng tốc độ, không nội suy tiến độ tiếp,
- *    và UI báo "đang chuẩn bị đoạn" thay vì in con số 0,24×.
+ *  - ETA = cộng thời gian còn lại của TỪNG khối theo tốc độ riêng của loại đó (loại chưa đo được thì ước lượng thô).
  */
 class ExportTracker(val blocks: List<SegInfo>, private val totalMs: Long, startNowMs: Long) {
     private val starts = LongArray(blocks.size).also { a ->
         var acc = 0L
         blocks.forEachIndexed { i, b -> a[i] = acc; acc += b.durationMs }
     }
-    private val nKinds = SegKind.values().size
-    private val rate = DoubleArray(nKinds)     // ms thời gian thật / ms video, 0 = chưa đo
-    private val byteRate = DoubleArray(nKinds) // byte / ms video, 0 = chưa đo
-    private var lastInt = 0
+    private val rate = DoubleArray(SegKind.values().size) // ms thời gian thật / ms video, 0 = chưa đo
+    private var lastP = 0.0
     private var lastIntAt = startNowMs
-    private var lastIntBytes = 0L
     private val t0 = startNowMs
     private var fineMax = 0f
-    private var curBlock = 0
-    private var skipNextStep = true            // bước % đầu tiên sau khi vào khối mới chứa thời gian khởi động → bỏ qua
-    private var enteredAt = startNowMs
 
     data class Snap(
         val progress: Float,
@@ -91,9 +86,6 @@ class ExportTracker(val blocks: List<SegInfo>, private val totalMs: Long, startN
         val blockPosMs: Long,
         val etaSec: Long,
         val segSpeedX: Float,
-        val warmup: Boolean = false,          // đang tua/khởi động nguồn của đoạn mới, chưa có tốc độ thật
-        val etaApprox: Boolean = false,       // ETA có chứa loại đoạn chưa đo được
-        val predictedBytes: Long = -1L,
     )
 
     fun blockAt(posMs: Long): Int {
@@ -102,75 +94,56 @@ class ExportTracker(val blocks: List<SegInfo>, private val totalMs: Long, startN
         return i
     }
 
-    private fun estRate(kind: SegKind, now: Long, pInt: Int): Double {
+    private fun estRate(kind: SegKind, now: Long, pct: Double): Double {
         val known = rate[kind.ordinal]
         if (known > 0.0) return known
         // chưa đo loại này: lấy tốc độ Game (nếu có) hoặc tốc độ trung bình toàn quá trình, reaction ước lượng nặng hơn
-        val doneMs = pInt / 100.0 * totalMs
+        val doneMs = pct / 100.0 * totalMs
         val base = if (rate[SegKind.GAME.ordinal] > 0.0) rate[SegKind.GAME.ordinal]
         else if (doneMs > 0) (now - t0) / doneMs else 0.0
         return base * (if (kind == SegKind.REACTION) 3.0 else 1.0)
     }
 
-    fun update(now: Long, pIntRaw: Int, bytes: Long = 0L): Snap {
-        val p = pIntRaw.coerceIn(lastInt, 100)
-        val pBlock = blockAt((p / 100.0 * totalMs).toLong())
-        if (pBlock != curBlock) { curBlock = pBlock; skipNextStep = true; enteredAt = now }
-        if (p > lastInt) {
-            val mediaDt = (p - lastInt) / 100.0 * totalMs
+    /**
+     * @param pctRaw   tiến độ TOÀN BỘ (0..100). Khi xuất theo từng phần thì đây là số thực ghép từ % của phần đang chạy.
+     * @param stepPct  độ mịn danh nghĩa của nguồn tiến độ (đơn vị %, toàn bộ). 1.0 = số nguyên 0..100 như Media3 trả về;
+     *                 xuất theo phần thì mỗi 1% của phần = (độ dài phần / tổng) %.
+     */
+    fun update(now: Long, pctRaw: Double, stepPct: Double = 1.0): Snap {
+        val step = stepPct.coerceIn(0.001, 1.0)
+        val p = pctRaw.coerceIn(lastP, 100.0)
+        if (p > lastP + 1e-9) {
+            val mediaDt = (p - lastP) / 100.0 * totalMs
             val wallDt = (now - lastIntAt).toDouble()
-            val startBlock = blockAt((lastInt / 100.0 * totalMs).toLong())
-            val endBlock = blockAt((p / 100.0 * totalMs).toLong())
-            // chỉ đo khi bước % nằm gọn trong MỘT khối và không phải bước đầu sau chuyển khối (có thời gian khởi động)
-            if (mediaDt > 0 && wallDt > 0 && startBlock == endBlock && !skipNextStep) {
-                val k = blocks[endBlock].kind.ordinal
+            if (mediaDt > 0 && wallDt > 0) {
+                val mid = ((lastP + p) / 2.0 / 100.0 * totalMs).toLong()
+                val k = blocks[blockAt(mid)].kind.ordinal
                 val r = wallDt / mediaDt
                 rate[k] = if (rate[k] == 0.0) r else 0.6 * rate[k] + 0.4 * r
-                val br = (bytes - lastIntBytes).coerceAtLeast(0L) / mediaDt
-                byteRate[k] = if (byteRate[k] == 0.0) br else 0.6 * byteRate[k] + 0.4 * br
             }
-            if (startBlock != endBlock) skipNextStep = true else skipNextStep = false
-            lastInt = p
+            lastP = p
             lastIntAt = now
-            lastIntBytes = bytes
         }
         val curKind = blocks[blockAt((p / 100.0 * totalMs).toLong())].kind
-        val known = rate[curKind.ordinal] > 0.0
-        val perPctWall = estRate(curKind, now, p) * totalMs / 100.0
-        val sinceInt = (now - lastIntAt).toDouble()
-        // Khởi động đoạn: vừa vào khối mới, chưa có số liệu thật, và số % đứng yên quá lâu so với mức thường gặp
-        val warmup = skipNextStep && sinceInt > maxOf(6_000.0, if (known) 3.0 * perPctWall else 0.0)
-        val frac = when {
-            warmup -> 0.0                                  // không chạy trước thực tế khi đang tua nguồn
-            perPctWall > 0 -> (sinceInt / perPctWall).coerceIn(0.0, 0.95)
-            else -> 0.0
-        }
-        var fine = ((p + frac) / 100.0).toFloat().coerceAtMost(0.999f)
+        val perStepWall = estRate(curKind, now, p) * totalMs * step / 100.0
+        val frac = if (perStepWall > 0) ((now - lastIntAt) / perStepWall).coerceIn(0.0, 0.95) else 0.0
+        var fine = ((p + frac * step) / 100.0).toFloat().coerceAtMost(0.999f)
         if (fine < fineMax) fine = fineMax else fineMax = fine
 
         val pos = (fine * totalMs).toLong()
         val bi = blockAt(pos)
         var wall = 0.0
-        var approx = false
-        var bytesLeft = 0.0
-        var bytesApprox = false
         for (j in bi until blocks.size) {
             val end = starts[j] + blocks[j].durationMs
             val remain = (end - maxOf(pos, starts[j])).coerceAtLeast(0L)
-            val kd = blocks[j].kind.ordinal
-            if (rate[kd] == 0.0 && remain > 0) approx = true
             wall += remain * estRate(blocks[j].kind, now, p)
-            if (byteRate[kd] > 0.0) bytesLeft += remain * byteRate[kd] else if (remain > 0) bytesApprox = true
         }
         val eta = if (wall > 0.0) (wall / 1000.0).toLong() else -1L
         val r = rate[blocks[bi].kind.ordinal]
         return Snap(
             progress = fine, posMs = pos, blockIndex = bi,
             blockPosMs = (pos - starts[bi]).coerceAtLeast(0L),
-            etaSec = eta, segSpeedX = if (r > 0.0 && !warmup) (1.0 / r).toFloat() else 0f,
-            warmup = warmup, etaApprox = approx,
-            // dung lượng cuối chỉ dự đoán khi mọi khối còn lại đã có tốc độ ghi byte thật của loại đó (Come back soon nhẹ ≠ Game nặng)
-            predictedBytes = if (!bytesApprox && bytes > 0) bytes + bytesLeft.toLong() else -1L,
+            etaSec = eta, segSpeedX = if (r > 0.0) (1.0 / r).toFloat() else 0f,
         )
     }
 }
@@ -212,7 +185,10 @@ class PreviewGrabber(private val ctx: Context, private val segs: List<Seg>) {
         return when (s) {
             is GameSeg -> frame(s.src, null, s.startMs + off)
             is ReactionSeg -> frame(s.src, null, off)
-            is AssetSeg -> frame(null, s.file, off.coerceAtMost(9_900L))
+            is AssetSeg -> {
+                val cap = if (s.file == Clips.CRASH_HOLD) Clips.CRASH_HOLD_LOOP_MS - 100L else 9_900L
+                frame(null, s.file, (s.startMs + off).coerceAtMost(cap))
+            }
             is RestSeg -> restPlate(off)
             is FreezeSeg -> frame(s.src, null, (s.posMs - 40L).coerceAtLeast(0L))
             is CrashSeg -> frame(null, Clips.CRASH, off.coerceAtMost(Clips.CRASH_MS - 100L))

@@ -83,7 +83,7 @@ object Planner {
     fun explain(time: StreamTime): String {
         val total = time.totalMin
         val o = openingMinutes(total)
-        return "Stream ${total / 60}h${"%02d".format(total % 60)}: mở màn Come back soon $o phút " +
+        return "Stream ${total / 60}h${"%02d".format(total % 60)}: mở màn (màn chờ) $o phút " +
             "(≈1/30 độ dài live, giới hạn 3–20), nghỉ khoảng mỗi $GAME_PER_BREAK_MIN phút chơi."
     }
 

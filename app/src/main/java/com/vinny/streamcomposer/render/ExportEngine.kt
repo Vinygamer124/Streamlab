@@ -8,6 +8,7 @@ import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.FrameDropEffect
@@ -54,6 +55,7 @@ data class ExportJob(
  */
 @UnstableApi
 object ExportEngine {
+    const val AUDIO_RATE = 48_000
 
     fun buildComposition(ctx: Context, job: ExportJob): Composition {
         val res = job.resources
@@ -71,7 +73,7 @@ object ExportEngine {
         for (seg in job.timeline.segs) {
             when (seg) {
                 is GameSeg -> videoItems += item(seg.src, seg.startMs, seg.startMs + seg.durationMs, common)
-                is AssetSeg -> videoItems += item(Clips.uri(seg.file), 0L, seg.durationMs, common)
+                is AssetSeg -> videoItems += item(Clips.uri(seg.file), seg.startMs, seg.startMs + seg.durationMs, common)
                 is FreezeSeg -> {
                     // Hình: khung cuối phủ kín. Tiếng: FREEZE_LOOP_MS cuối của game lặp lại nhiều lần (âm thanh treo).
                     val frozen = FrozenFrame(ctx, seg.src, (seg.posMs - 40L).coerceAtLeast(0L))
@@ -87,7 +89,7 @@ object ExportEngine {
                     }
                 }
                 is CrashSeg -> {
-                    // khung game đóng băng giữ nét 0,2 s rồi tối dần tới 0,45 s (nền clip lúc này đen), sau đó hiện màn lỗi PS5
+                    // khung game đóng băng giữ nét 0,2 s rồi tối dần tới 0,45 s (clip lúc này đen), sau đó nền loop + màn lỗi PS5 hiện dần
                     val frozen = FrozenFrame(ctx, seg.frozenSrc, seg.frozenPosMs)
                     val clock = SegClock(seg.offsetMs * 1000L)
                     val alpha = { t: Long -> 1f - ((t / 1_000_000f - 0.2f) / 0.25f).coerceIn(0f, 1f) }
@@ -134,7 +136,9 @@ object ExportEngine {
         return Composition.Builder(sequences)
             .setEffects(
                 Effects(
-                    emptyList<AudioProcessor>(),
+                    // ép đầu ra luôn 48 kHz: các phần xuất riêng lẻ phải cùng định dạng âm thanh thì mới ghép được.
+                    // Nguồn đã 48 kHz (clip trong app, đa số video game) thì processor tự bỏ qua, không tốn gì.
+                    listOf<AudioProcessor>(SonicAudioProcessor().apply { setOutputSampleRateHz(AUDIO_RATE) }),
                     if (job.settings.safeMode) emptyList<Effect>()
                     else listOf<Effect>(OverlayEffect(ImmutableList.of<androidx.media3.effect.TextureOverlay>(
                         BitmapOverlay.createStaticBitmapOverlay(social)

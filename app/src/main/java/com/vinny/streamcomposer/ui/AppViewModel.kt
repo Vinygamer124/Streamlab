@@ -216,6 +216,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .putBoolean("safe", _settings.value.safeMode)
             .putBoolean("gpuc", _settings.value.gpuContour)
             .putBoolean("crash", _settings.value.gtaCrashEnding)
+            .putInt("crashHold", _settings.value.crashHoldMin)
+            .putString("openScr", _settings.value.openingScreen.name)
+            .putString("brkScr", _settings.value.breakScreen.name)
+            .putBoolean("thanks", _settings.value.thanksEnding)
+            .putInt("thanksSec", _settings.value.thanksSec)
             .apply()
     }
 
@@ -238,6 +243,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 safeMode = prefs.getBoolean("safe", false),
                 gpuContour = prefs.getBoolean("gpuc", true),
                 gtaCrashEnding = prefs.getBoolean("crash", false),
+                crashHoldMin = prefs.getInt("crashHold", 3).coerceIn(0, 10),
+                openingScreen = runCatching { com.vinny.streamcomposer.data.OpeningScreen.valueOf(prefs.getString("openScr", "STARTING")!!) }.getOrDefault(com.vinny.streamcomposer.data.OpeningScreen.STARTING),
+                breakScreen = runCatching { com.vinny.streamcomposer.data.BreakScreen.valueOf(prefs.getString("brkScr", "BRB")!!) }.getOrDefault(com.vinny.streamcomposer.data.BreakScreen.BRB),
+                thanksEnding = prefs.getBoolean("thanks", true),
+                thanksSec = prefs.getInt("thanksSec", 30).coerceIn(com.vinny.streamcomposer.data.THANKS_MIN_SEC, com.vinny.streamcomposer.data.THANKS_MAX_SEC),
             )
         } catch (_: Exception) {}
         autoPlan()

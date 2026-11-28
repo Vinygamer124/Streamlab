@@ -11,20 +11,11 @@ android {
         applicationId = "com.vinny.streamcomposer"
         minSdk = 26
         targetSdk = 35
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1)
-        versionName = "1.0.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
-    }
-    signingConfigs {
-        create("fixed") {
-            storeFile = file("release.jks")
-            storePassword = "streamlab"
-            keyAlias = "key"
-            keyPassword = "streamlab"
-        }
+        versionCode = 2
+        versionName = "1.1.0"
     }
     buildTypes {
-        debug { signingConfig = signingConfigs.getByName("fixed") }
-        release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("fixed") }
+        release { isMinifyEnabled = false }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -34,6 +25,7 @@ android {
     buildFeatures { compose = true }
     androidResources { noCompress += listOf("mp4", "m4a", "png") }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 dependencies {
@@ -51,4 +43,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.mockito:mockito-core:5.12.0")
 }

@@ -37,8 +37,8 @@ data class BreakBlock(
 
 /** Tên hiển thị rõ ràng của một break. */
 fun BreakBlock.title(): String = when {
-    opening -> "Mở màn · Come back soon"
-    kind == BreakKind.COMEBACK -> "Come back soon"
+    opening -> "Mở màn · màn chờ"
+    kind == BreakKind.COMEBACK -> "Nghỉ · màn chờ"
     dinner -> "Dinner reaction"
     label.contains("lunch", ignoreCase = true) -> "Lunch reaction"
     else -> "Reaction"
@@ -66,7 +66,24 @@ data class ExportSettings(
     val safeMode: Boolean = false, // chẩn đoán: tắt overlay contour + social
     val gpuContour: Boolean = true, // contour bằng fragment shader (GPU); tắt = vẽ bitmap bằng CPU như bản cũ
     val gtaCrashEnding: Boolean = false, // kết thúc stream bằng cảnh GTA crash (đóng băng → lỗi PS5). Tuỳ chọn, mặc định tắt
+    val openingScreen: OpeningScreen = OpeningScreen.STARTING, // màn mở màn stream
+    val breakScreen: BreakScreen = BreakScreen.BRB,            // màn nghỉ giữa stream
+    val thanksEnding: Boolean = true,    // kết thúc stream bằng màn Thanks for watching (lấy bớt từ cuối đoạn game nên tổng không đổi)
+    val thanksSec: Int = 30,             // độ dài màn Thanks for watching (giây, bội số của 10)
+    val crashHoldMin: Int = 3,           // kéo dài màn lỗi PS5 (Report Problem, nền loop) thêm bao nhiêu phút; lấy từ cuối đoạn game nên tổng không đổi
 )
+
+/** Màn chờ ở đầu stream (block mở màn). */
+enum class OpeningScreen(val label: String, val file: String) {
+    STARTING("Starting soon", Clips.STARTING_SOON),
+    COMEBACK("Come back soon", Clips.COMEBACK),
+}
+
+/** Màn chờ ở các break giữa stream. */
+enum class BreakScreen(val label: String, val file: String) {
+    BRB("Be right back", Clips.BE_RIGHT_BACK),
+    COMEBACK("Come back soon", Clips.COMEBACK),
+}
 
 data class StreamTime(val startMin: Int = 20 * 60, val endMin: Int = 23 * 60) {
     val totalMin: Int get() = Planner.durationMinutes(startMin, endMin)
